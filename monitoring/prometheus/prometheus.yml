@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'fraud-api-service'
+    static_configs:
+      - targets: ['api-service:8000']
+    metrics_path: /metrics
+
+  - job_name: 'fraud-worker-service'
+    static_configs:
+      - targets: ['worker-service:9091']
+    metrics_path: /metrics

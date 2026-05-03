@@ -1,0 +1,198 @@
+version: '3.8'
+
+services:
+  postgresql:
+    image: postgres:16-alpine
+    container_name: fraud_postgresql
+    environment:
+      POSTGRES_DB: frauddb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fraud-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: fraud_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fraud-net
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: fraud_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - fraud-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: fraud_kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: 3
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - fraud-net
+
+  api-service:
+    build:
+      context: ./api-service
+      dockerfile: Dockerfile
+    container_name: fraud_api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres123@postgresql:5432/frauddb
+      REDIS_URL: redis://redis:6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TRANSACTIONS_TOPIC: transactions
+      KAFKA_PROCESSED_TOPIC: processed_transactions
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - fraud-net
+
+  worker-service:
+    build:
+      context: ./worker-service
+      dockerfile: Dockerfile
+    container_name: fraud_worker
+    ports:
+      - "9091:9091"   # Prometheus metrics
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres123@postgresql:5432/frauddb
+      REDIS_URL: redis://redis:6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TRANSACTIONS_TOPIC: transactions
+      KAFKA_PROCESSED_TOPIC: processed_transactions
+      KAFKA_GROUP_ID: fraud-worker-group
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - fraud-net
+
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    container_name: fraud_mcp
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres123@postgresql:5432/frauddb
+      REDIS_URL: redis://redis:6379
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8080
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - fraud-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fraud_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-service
+    networks:
+      - fraud-net
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: fraud_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - api-service
+      - worker-service
+    restart: on-failure
+    networks:
+      - fraud-net
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: fraud_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: fraud123
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: on-failure
+    networks:
+      - fraud-net
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  fraud-net:
+    driver: bridge

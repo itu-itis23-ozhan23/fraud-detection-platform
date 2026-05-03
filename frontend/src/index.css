@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-950 text-gray-100 font-sans antialiased;
+  }
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer components {
+  .badge-suspicious {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-900/60 text-red-300 border border-red-700;
+  }
+  .badge-approved {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-900/60 text-green-300 border border-green-700;
+  }
+  .badge-pending {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-900/60 text-yellow-300 border border-yellow-700;
+  }
+  .card {
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-4;
+  }
+  .risk-high   { @apply text-red-400 font-bold; }
+  .risk-medium { @apply text-orange-400 font-bold; }
+  .risk-low    { @apply text-green-400 font-bold; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { @apply bg-gray-900; }
+::-webkit-scrollbar-thumb { @apply bg-gray-700 rounded-full; }
+
+/* Pulse animation for live indicator */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.live-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
